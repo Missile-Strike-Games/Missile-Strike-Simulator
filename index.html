@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Missile Strike Simulator</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js for 3D graphics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Inter', sans-serif; }
+        
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; z-index: 1; }
+        
+        /* Compact Panel sliding transition */
+        #ui-panel { 
+            position: absolute; top: 0; right: 0; width: 360px; max-width: 90vw; height: 100vh; 
+            background: rgba(15, 23, 42, 0.95); border-left: 1px solid #1e293b; z-index: 50; 
+            display: flex; flex-direction: column; box-shadow: -5px 0 25px rgba(0,0,0,0.8); 
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 1rem;
+        }
+        
+        #ui-panel.collapsed { transform: translateX(100%); }
+
+        /* Toggle Button */
+        #togglePanelBtn {
+            position: absolute; top: 15px; left: -36px; width: 36px; height: 40px;
+            background: rgba(15, 23, 42, 0.95); border: 1px solid #1e293b; border-right: none;
+            border-radius: 8px 0 0 8px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 51; color: white; transition: all 0.2s;
+        }
+        #togglePanelBtn:hover { background: #1e293b; }
+        
+        /* Custom scrollbars */
+        #log-container::-webkit-scrollbar, #ai-report-content::-webkit-scrollbar { width: 4px; }
+        #log-container::-webkit-scrollbar-track, #ai-report-content::-webkit-scrollbar-track { background: transparent; }
+        #log-container::-webkit-scrollbar-thumb, #ai-report-content::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        
+        .log-entry { margin-bottom: 4px; font-size: 0.75rem; padding: 4px 6px; border-radius: 3px; border-left: 2px solid; }
+        .log-info { background: rgba(59, 130, 246, 0.1); border-color: #3b82f6; color: #bfdbfe; }
+        .log-warning { background: rgba(245, 158, 11, 0.1); border-color: #f59e0b; color: #fde68a; }
+        .log-danger { background: rgba(239, 68, 68, 0.1); border-color: #ef4444; color: #fecaca; }
+        .log-success { background: rgba(16, 185, 129, 0.1); border-color: #10b981; color: #a7f3d0; }
+        
+        /* Autocomplete styles */
+        .autocomplete-list { position: absolute; z-index: 1000; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 4px; max-height: 120px; overflow-y: auto; display: none; margin-top: 2px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
+        .autocomplete-list.active { display: block; }
+        .autocomplete-item { padding: 6px 10px; cursor: pointer; color: #cbd5e1; font-size: 0.8rem; }
+        .autocomplete-item:hover { background: #334155; color: white; }
+
+        /* Stats Dashboard */
+        .stat-box { background: rgba(0,0,0,0.3); border: 1px solid #334155; border-radius: 6px; padding: 6px; text-align: center; }
+        .stat-val { font-size: 1.25rem; font-weight: bold; line-height: 1; margin-top: 2px; }
+        
+        /* POV HUD Overlay */
+        #pov-hud {
+            position: absolute; top: 5%; left: 50%; transform: translateX(-50%);
+            background: rgba(10, 0, 0, 0.7); border: 1px solid #ef4444; border-radius: 8px;
+            padding: 10px 20px; text-align: center; color: #ef4444; font-family: 'Courier New', Courier, monospace;
+            z-index: 40; pointer-events: none; display: none; box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+            backdrop-filter: blur(4px);
+        }
+        #pov-hud.active { display: block; }
+        .hud-title { font-size: 1.2rem; font-weight: bold; letter-spacing: 2px; margin-bottom: 5px; text-shadow: 0 0 5px #ef4444; }
+        .hud-data { font-size: 0.9rem; margin-bottom: 2px; color: #fca5a5; }
+        .hud-warning { color: #facc15; font-weight: bold; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* AI Intel Report Section - Redesigned to look tactical */
+        #ai-report-panel {
+            background: rgba(5, 15, 5, 0.95); border: 1px solid #10b981; border-radius: 6px; 
+            padding: 10px; margin-top: 10px; display: none; box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+        }
+        .typewriter { font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: #34d399; line-height: 1.4; }
+        .typewriter ul { padding-left: 15px; margin: 5px 0; }
+        .typewriter li { margin-bottom: 3px; }
+    </style>
+</head>
+<body>
+
+    <!-- POV HUD Overlay -->
+    <div id="pov-hud">
+        <div class="hud-title">SATELLITE TRACKING</div>
+        <div class="hud-data">TARGET: <span id="hud-target" class="text-white">---</span></div>
+        <div class="hud-data">ACTIVE IN AIR: <span id="hud-active" class="text-white font-bold">0</span></div>
+        <div class="hud-data mt-2 text-xs">STATUS: <span id="hud-status" class="hud-warning">IN FLIGHT</span></div>
+    </div>
+
+    <!-- פאנל צדדי קומפקטי -->
+    <div id="ui-panel">
+        <button id="togglePanelBtn" aria-label="Toggle Panel">
+            <svg id="toggleIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>
+
+        <div class="mb-3">
+            <h1 class="text-xl font-bold text-blue-400 tracking-wider flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M12 2C12 2 8 6 8 12V18L12 20L16 18V12C16 6 12 2 12 2Z" fill="#111" stroke="#fff" stroke-width="1"/>
+                    <path d="M12 2C12 2 9.5 4.5 8.7 8H15.3C14.5 4.5 12 2 12 2Z" fill="#dc2626"/>
+                    <path d="M8 14L4 18V20L8 18V14Z" fill="#fff"/>
+                    <path d="M16 14L20 18V20L16 18V14Z" fill="#fff"/>
+                </svg>
+                MISSILE STRIKE
+            </h1>
+        </div>
+
+        <!-- Dashboard Stats -->
+        <div class="grid grid-cols-3 gap-2 mb-4 flex-shrink-0">
+            <div class="stat-box">
+                <div class="text-[0.65rem] text-slate-400 uppercase tracking-wider">Launched</div>
+                <div id="statLaunched" class="stat-val text-white">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="text-[0.65rem] text-slate-400 uppercase tracking-wider">Intercepted</div>
+                <div id="statIntercepted" class="stat-val text-blue-400">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="text-[0.65rem] text-slate-400 uppercase tracking-wider">Impacts</div>
+                <div id="statHits" class="stat-val text-red-500">0</div>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col gap-3 overflow-y-auto pr-1 pb-1">
+            
+            <button id="aiScenarioBtn" class="w-full bg-slate-700 hover:bg-slate-600 text-teal-300 font-bold py-1.5 px-4 rounded shadow-[0_0_10px_rgba(20,184,166,0.3)] border border-teal-800 transition-all text-[0.7rem] uppercase tracking-wider flex justify-center items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
+                AI Scenario Generator
+            </button>
+
+            <!-- Source & Target side-by-side -->
+            <div class="grid grid-cols-2 gap-2">
+                <div class="flex flex-col gap-1 relative">
+                    <label class="text-[0.7rem] font-semibold text-slate-300 uppercase">Origin</label>
+                    <input type="text" id="sourceCity" autocomplete="off" placeholder="Tehran..." class="bg-slate-800 text-sm text-white border border-slate-600 p-1.5 rounded focus:outline-none focus:border-blue-500" value="Tehran">
+                    <div id="sourceSuggestions" class="autocomplete-list"></div>
+                </div>
+                <div class="flex flex-col gap-1 relative">
+                    <label class="text-[0.7rem] font-semibold text-slate-300 uppercase">Target</label>
+                    <input type="text" id="targetCity" autocomplete="off" placeholder="Tel Aviv..." class="bg-slate-800 text-sm text-white border border-slate-600 p-1.5 rounded focus:outline-none focus:border-red-500" value="Tel Aviv">
+                    <div id="targetSuggestions" class="autocomplete-list"></div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-[0.7rem] font-semibold text-slate-300 uppercase">Munition Type</label>
+                <select id="missileType" class="bg-slate-800 text-sm text-white border border-slate-600 p-1.5 rounded focus:outline-none focus:border-blue-500">
+                    <option value="mrbm">MRBM (Medium Range Missile)</option>
+                    <option value="icbm">ICBM (Intercontinental)</option>
+                    <option value="hypersonic">Hypersonic Glide Vehicle</option>
+                    <option value="cruise">Cruise Missile</option>
+                    <option value="uav">UAV (Combat Drone / כטב"ם)</option>
+                </select>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-[0.7rem] font-semibold text-slate-300 uppercase">Camera View</label>
+                <select id="cameraMode" class="bg-slate-800 text-sm text-white border border-slate-600 p-1.5 rounded focus:outline-none focus:border-blue-500">
+                    <option value="free">Free Orbit (Default)</option>
+                    <option value="pov">Target Cam (POV Auto-Track)</option>
+                </select>
+            </div>
+
+            <!-- Count & Speed side-by-side -->
+            <div class="grid grid-cols-2 gap-2 items-end">
+                <div class="flex flex-col gap-1">
+                    <label class="text-[0.7rem] font-semibold text-slate-300 uppercase">Volley Size</label>
+                    <input type="number" id="missileCount" min="1" max="300" value="1" class="bg-slate-800 text-sm text-white border border-slate-600 p-1.5 rounded focus:outline-none focus:border-blue-500 text-center">
+                </div>
+                <div class="flex flex-col gap-1">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[0.7rem] font-semibold text-slate-300 uppercase">Sim Speed</label>
+                        <span id="speedValue" class="text-[0.7rem] text-blue-400 font-bold">10x</span>
+                    </div>
+                    <input type="range" id="simSpeed" min="1" max="500" value="10" class="w-full accent-blue-500 mb-2">
+                </div>
+            </div>
+
+            <!-- Toggles: Air Defense & Sound -->
+            <div class="grid grid-cols-2 gap-2">
+                <div class="flex flex-col items-center justify-center bg-slate-800/80 p-2 rounded border border-slate-700">
+                    <label class="text-[0.65rem] font-semibold text-slate-300 uppercase mb-1" for="airDefense">Air Defense</label>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="airDefense" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                </div>
+                <div class="flex flex-col items-center justify-center bg-slate-800/80 p-2 rounded border border-slate-700">
+                    <label class="text-[0.65rem] font-semibold text-slate-300 uppercase mb-1" for="soundToggle">Sound FX</label>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="soundToggle" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+                    </label>
+                </div>
+            </div>
+            
+            <button id="launchBtn" class="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded shadow-[0_0_15px_rgba(220,38,38,0.7)] transition-all uppercase text-[0.85rem] tracking-widest active:scale-95 flex-shrink-0 relative">
+                Initiate Strike
+            </button>
+            
+            <button id="aiReportBtn" class="mt-1 w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold py-2 px-4 rounded border border-emerald-800 transition-all text-[0.7rem] uppercase tracking-wider flex justify-center items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                Generate Intel SitRep
+            </button>
+
+            <!-- AI Output Panel (Tactical look) -->
+            <div id="ai-report-panel">
+                <div class="flex items-center justify-between mb-1 border-b border-emerald-800/50 pb-1">
+                    <div class="flex items-center gap-2">
+                        <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                        <span class="text-[0.65rem] text-emerald-400 font-bold uppercase tracking-widest">TACTICAL BDA REPORT</span>
+                    </div>
+                </div>
+                <div id="ai-report-content" class="typewriter h-[100px] overflow-y-auto">Awaiting telemetry...</div>
+            </div>
+
+        </div>
+
+        <!-- Event Log -->
+        <div class="flex-1 min-h-[100px] flex flex-col bg-slate-900 border border-slate-700 rounded p-2 mt-3 overflow-hidden">
+            <h3 class="text-[0.65rem] font-bold text-slate-400 uppercase mb-1 border-b border-slate-700 pb-1">System Logs</h3>
+            <div id="log-container" class="flex-1 overflow-y-auto pr-1 flex flex-col justify-start">
+                <div class="log-entry log-info">System Ready. Awaiting orders.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- אזור עיבוד התלת מימד -->
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- Web Audio API (Sound System) ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
+        let soundEnabled = true;
+
+        document.getElementById('soundToggle').addEventListener('change', (e) => {
+            soundEnabled = e.target.checked;
+            if(soundEnabled && audioCtx.state === 'suspended') audioCtx.resume();
+        });
+        
+        // Initialize audio on first click anywhere
+        document.body.addEventListener('click', () => {
+            if (audioCtx.state === 'suspended' && soundEnabled) audioCtx.resume();
+        }, { once: true });
+
+        function playSound(type) {
+            if (!soundEnabled || audioCtx.state === 'suspended') return;
+            
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            if (type === 'launch') {
+                // צליל שיגור רך ועמוק יותר (לא מפחיד)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(120, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 1.2);
+                gainNode.gain.setValueAtTime(0.15, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+                osc.start(now);
+                osc.stop(now + 1.2);
+            } else if (type === 'explosion') {
+                // פיצוץ עמום ומרוחק יותר (בום עדין ולא רעש לבן צורם)
+                const bufferSize = audioCtx.sampleRate * 1.0;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                
+                const noise = audioCtx.createBufferSource();
+                noise.buffer = buffer;
+                
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(400, now);
+                filter.frequency.exponentialRampToValueAtTime(30, now + 1.0);
+                
+                noise.connect(filter);
+                filter.connect(gainNode);
+                
+                gainNode.gain.setValueAtTime(0.4, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
+                noise.start(now);
+                noise.stop(now + 1.0);
+            } else if (type === 'intercept') {
+                // צליל יירוט קצר ועדין (כמו קליק טקטי)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1000, now);
+                osc.frequency.exponentialRampToValueAtTime(300, now + 0.2);
+                gainNode.gain.setValueAtTime(0.05, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+        }
+
+        // --- Gemini API Setup ---
+        const apiKey = ""; 
+        
+        async function fetchWithRetry(url, options, retries = 5) {
+            const delays = [1000, 2000, 4000, 8000, 16000];
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    if (i === retries - 1) throw e;
+                    await new Promise(res => setTimeout(res, delays[i]));
+                }
+            }
+        }
+
+        document.getElementById('aiScenarioBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('aiScenarioBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-pulse">Consulting AI... ✨</span>`;
+            
+            const prompt = `Generate a realistic or historically plausible hypothetical military strike scenario. 
+            Return ONLY a raw JSON object (no markdown, no backticks) with the following exact keys:
+            "origin": (string, origin city name),
+            "target": (string, target city name, must be a different country),
+            "type": (string, exactly one of: "mrbm", "icbm", "uav", "cruise"),
+            "count": (number, realistic integer between 5 and 50).`;
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            try {
+                const data = await fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: { responseMimeType: "application/json" }
+                    })
+                });
+                
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if(text) {
+                    const scenario = JSON.parse(text);
+                    document.getElementById('sourceCity').value = scenario.origin;
+                    document.getElementById('targetCity').value = scenario.target;
+                    document.getElementById('missileType').value = scenario.type;
+                    document.getElementById('missileCount').value = scenario.count;
+                    addLog(`AI Scenario Loaded: Conflict between ${scenario.origin} and ${scenario.target}.`, 'warning');
+                }
+            } catch (err) {
+                addLog('AI Scenario Generation Failed.', 'danger');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        });
+
+        document.getElementById('aiReportBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('aiReportBtn');
+            const panel = document.getElementById('ai-report-panel');
+            const content = document.getElementById('ai-report-content');
+            
+            if (gameStats.launched === 0) {
+                panel.style.display = 'block';
+                content.innerHTML = '<span class="text-red-400">ERROR: NO TELEMETRY DATA.</span>';
+                return;
+            }
+
+            btn.disabled = true;
+            panel.style.display = 'block';
+            content.innerHTML = '<span class="animate-pulse">GENERATING BDA...</span>';
+            
+            const origin = document.getElementById('sourceCity').value;
+            const target = document.getElementById('targetCity').value;
+
+            // Updated prompt to be short, tactical, and clear
+            const prompt = `You are a military intelligence AI. Write a highly concise, 3-point bulleted Battle Damage Assessment (BDA) report.
+            Data: ${origin} attacked ${target}. Total Launched: ${gameStats.launched}. Impacts: ${gameStats.hits}. Intercepted: ${gameStats.intercepted}.
+            Rule: Output ONLY the bullet points using asterisks (*). Use short military terminology. Do not write introductory or concluding text.`;
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            try {
+                const data = await fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                
+                let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "ANALYSIS FAILED.";
+                
+                // Formating the raw text to HTML lists
+                text = text.replace(/\* (.*)/g, '<li>$1</li>');
+                text = `<ul>${text}</ul>`;
+
+                content.innerHTML = "";
+                content.innerHTML = text; // Just show it immediately, the typewriter was too slow
+                
+            } catch (err) {
+                content.innerHTML = '<span class="text-red-500">UPLINK FAILED.</span>';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // --- Variables & Stats ---
+        const EARTH_RADIUS = 10;
+        let scene, camera, renderer, controls, earth;
+        let missiles = [];
+        let interceptors = []; 
+        let explosions = [];
+        let spawnedCities = {}; 
+        let lastTime = 0;
+        
+        let gameStats = { launched: 0, hits: 0, intercepted: 0 };
+        let currentCameraMode = 'free';
+        let trackedMissile = null;
+        let povExplosion = { active: false, pos: null, timer: 0 }; 
+
+        const uiLog = document.getElementById('log-container');
+        const speedSlider = document.getElementById('simSpeed');
+        const speedValue = document.getElementById('speedValue');
+        const panel = document.getElementById('ui-panel');
+        const toggleBtn = document.getElementById('togglePanelBtn');
+        const toggleIcon = document.getElementById('toggleIcon');
+        const cameraModeSelect = document.getElementById('cameraMode');
+        const povHud = document.getElementById('pov-hud'); 
+
+        cameraModeSelect.addEventListener('change', (e) => {
+            currentCameraMode = e.target.value;
+            if (currentCameraMode === 'free') {
+                controls.enabled = true;
+                // תיקון מצלמה: איפוס מרכז המיקוד חזרה לכדור הארץ כדי שאפשר יהיה לעשות זום
+                controls.target.set(0, 0, 0);
+            } else if (currentCameraMode === 'pov') {
+                if (missiles.length === 0) {
+                    addLog('POV mode engaged. Waiting for launch...', 'info');
+                }
+            }
+        });
+
+        function updateStatsUI() {
+            document.getElementById('statLaunched').innerText = gameStats.launched;
+            document.getElementById('statHits').innerText = gameStats.hits;
+            document.getElementById('statIntercepted').innerText = gameStats.intercepted;
+        }
+
+        function addLog(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `log-entry log-${type}`;
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            div.innerHTML = `[${time}] ${message}`;
+            uiLog.appendChild(div);
+            uiLog.scrollTop = uiLog.scrollHeight;
+        }
+
+        speedSlider.addEventListener('input', (e) => { speedValue.innerText = e.target.value + 'x'; });
+        
+        toggleBtn.addEventListener('click', () => {
+            panel.classList.toggle('collapsed');
+            toggleIcon.innerHTML = panel.classList.contains('collapsed') ? 
+                '<polyline points="15 18 9 12 15 6"></polyline>' : 
+                '<polyline points="9 18 15 12 9 6"></polyline>';
+        });
+
+        const CITIES_LIST = [
+            "Jerusalem", "Tel Aviv", "Haifa", "Tehran", "Isfahan", "Damascus", "Beirut", "Amman", "Cairo", "Baghdad",
+            "Riyadh", "Dubai", "Abu Dhabi", "Doha", "Kuwait City", "Moscow", "Saint Petersburg", "Kiev", "Minsk", "Warsaw",
+            "New York", "Washington D.C.", "Los Angeles", "Chicago", "Houston", "London", "Paris", "Berlin", "Rome", "Madrid",
+            "Tokyo", "Beijing", "Shanghai", "Seoul", "Pyongyang", "New Delhi", "Mumbai", "Karachi", "Islamabad", "Kabul",
+            "Ashdod", "Rishon LeZion", "Petah Tikva", "Ashkelon", "Netanya", "Beer Sheva", "Holon", "Bnei Brak", "Rehovot",
+            "Istanbul", "Ankara", "Athens", "Sofia", "Bucharest", "Budapest", "Vienna", "Prague", "Amsterdam", "Brussels"
+        ];
+
+        function setupAutocomplete(inputId, suggestionsId) {
+            const input = document.getElementById(inputId);
+            const list = document.getElementById(suggestionsId);
+            input.addEventListener('input', () => {
+                const val = input.value.toLowerCase().trim();
+                list.innerHTML = '';
+                if (!val) { list.classList.remove('active'); return; }
+                const matches = CITIES_LIST.filter(c => c.toLowerCase().includes(val)).slice(0, 5);
+                if (matches.length > 0) {
+                    list.classList.add('active');
+                    matches.forEach(match => {
+                        const div = document.createElement('div');
+                        div.className = 'autocomplete-item';
+                        div.innerHTML = match.replace(new RegExp(`(${val})`, "gi"), "<b class='text-blue-400'>$1</b>");
+                        div.onclick = () => { input.value = match; list.classList.remove('active'); };
+                        list.appendChild(div);
+                    });
+                } else list.classList.remove('active');
+            });
+            document.addEventListener('click', (e) => {
+                if (e.target !== input && e.target !== list) list.classList.remove('active');
+            });
+        }
+        setupAutocomplete('sourceCity', 'sourceSuggestions');
+        setupAutocomplete('targetCity', 'targetSuggestions');
+
+        // --- Three.js Setup ---
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x010204);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.01, 1000);
+            camera.position.set(0, 15, 30);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            // התיקון לזום: 0.15 מספק מרווח בטוח מגובה הבניינים כך שהמצלמה לעולם לא תיכנס לאדמה!
+            controls.minDistance = EARTH_RADIUS + 0.15; 
+            controls.maxDistance = 60;
+            controls.enablePan = false; 
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+            const dl = new THREE.DirectionalLight(0xffffff, 1.5);
+            dl.position.set(50, 20, 30);
+            scene.add(dl);
+
+            createEarth();
+            createStars();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+            requestAnimationFrame(animate);
+        }
+
+        function createEarth() {
+            earth = new THREE.Group();
+            scene.add(earth);
+
+            const geometry = new THREE.SphereGeometry(EARTH_RADIUS, 256, 256); 
+            const material = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x000511, shininess: 25 });
+            const earthMesh = new THREE.Mesh(geometry, material);
+            earth.add(earthMesh);
+
+            const tl = new THREE.TextureLoader();
+            const maxAniso = renderer.capabilities.getMaxAnisotropy(); 
+
+            tl.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg', (texture) => { 
+                texture.anisotropy = maxAniso; texture.minFilter = THREE.LinearFilter;
+                material.map = texture; material.needsUpdate = true; 
+            }, undefined, () => { 
+                earth.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x0088ff, wireframe: true, transparent: true, opacity: 0.1 }))); 
+            });
+
+            tl.load('https://unpkg.com/three-globe/example/img/earth-topology.png', (texture) => { 
+                texture.anisotropy = maxAniso;
+                material.bumpMap = texture; material.bumpScale = 0.15; material.needsUpdate = true; 
+            });
+
+            tl.load('https://unpkg.com/three-globe/example/img/earth-water.png', (texture) => { 
+                texture.anisotropy = maxAniso;
+                material.specularMap = texture; material.specular = new THREE.Color(0x555555); material.needsUpdate = true; 
+            });
+
+            const cloudGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.015, 256, 256);
+            const cloudMat = new THREE.MeshPhongMaterial({
+                map: tl.load('https://unpkg.com/three-globe/example/img/earth-clouds10k.png'),
+                transparent: true,
+                opacity: 0.95,
+                blending: THREE.AdditiveBlending,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            const clouds = new THREE.Mesh(cloudGeo, cloudMat);
+            earth.add(clouds);
+            earth.userData.clouds = clouds; 
+
+            const atmosMat = new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.15, side: THREE.BackSide, blending: THREE.AdditiveBlending });
+            earth.add(new THREE.Mesh(new THREE.SphereGeometry(EARTH_RADIUS * 1.025, 64, 64), atmosMat));
+        }
+
+        function createStars() {
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(3000 * 3);
+            for(let i=0; i<3000*3; i++) pos[i] = (Math.random() - 0.5) * 200;
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.1, color: 0xffffff, transparent: true, opacity: 0.6 })));
+        }
+
+        function latLongToVector3(lat, lon, radius) {
+            const phi = (90 - lat) * (Math.PI / 180), theta = (lon + 180) * (Math.PI / 180);
+            return new THREE.Vector3(-(radius * Math.sin(phi) * Math.cos(theta)), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
+        }
+
+        function spawnCityBlocks(lat, lon, cityName) {
+            if (spawnedCities[cityName]) return; 
+            spawnedCities[cityName] = true;
+
+            const cityGroup = new THREE.Group();
+            const pos = latLongToVector3(lat, lon, EARTH_RADIUS);
+            cityGroup.position.copy(pos);
+
+            const normal = pos.clone().normalize();
+            const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+            cityGroup.quaternion.copy(quat);
+
+            const numBuildings = 120;
+            const districts = [
+                {x: 0, y: 0, r: 0.02, h: 1.0}, 
+                {x: 0.015, y: 0.015, r: 0.015, h: 0.5}, 
+                {x: -0.015, y: -0.015, r: 0.02, h: 0.4} 
+            ];
+            
+            for(let i=0; i<numBuildings; i++) {
+                const dist = districts[Math.floor(Math.random() * districts.length)];
+                const ang = Math.random() * Math.PI * 2;
+                const r = Math.pow(Math.random(), 0.8) * dist.r;
+                const lx = dist.x + Math.cos(ang) * r;
+                const lz = dist.y + Math.sin(ang) * r;
+
+                const gridSize = 0.003;
+                const snappedX = Math.round(lx / gridSize) * gridSize;
+                const snappedZ = Math.round(lz / gridSize) * gridSize;
+
+                const centerDist = Math.sqrt(Math.pow(snappedX-dist.x, 2) + Math.pow(snappedZ-dist.y, 2));
+                const heightMult = Math.max(0.1, 1.0 - (centerDist / dist.r));
+                
+                const isSkyscraper = Math.random() > 0.7 && heightMult > 0.5;
+                const w = 0.002 + Math.random() * 0.003;
+                const d = 0.002 + Math.random() * 0.003;
+                const h = (0.003 + Math.random() * 0.01) + (isSkyscraper ? Math.random() * 0.04 * dist.h * heightMult : 0);
+                
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mat = new THREE.MeshPhongMaterial({
+                    color: 0x334455,
+                    emissive: Math.random() > 0.7 ? 0x112233 : 0x000000,
+                    specular: 0x888888,
+                    shininess: isSkyscraper ? 50 : 10
+                });
+                
+                const building = new THREE.Mesh(geo, mat);
+                building.position.set(snappedX, h/2, snappedZ);
+                cityGroup.add(building);
+            }
+
+            earth.add(cityGroup);
+        }
+
+        function getDistanceKm(lat1, lon1, lat2, lon2) {
+            const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+        }
+
+        async function getCoords(cityName) {
+            try {
+                const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&format=json`);
+                const data = await res.json();
+                if (data?.results?.length > 0) return { lat: data.results[0].latitude, lon: data.results[0].longitude, name: data.results[0].name };
+            } catch (e) {} return null;
+        }
+
+        function createExplosion(pos, colorHex, scaleMult) {
+            playSound('explosion');
+            
+            const mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 1, blending: THREE.AdditiveBlending });
+            const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.3 * scaleMult, 16, 16), mat);
+            sphere.position.copy(pos);
+            earth.add(sphere);
+
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(0.1, 0.6 * scaleMult, 32),
+                new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.8, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
+            );
+            ring.position.copy(pos);
+            ring.lookAt(new THREE.Vector3(0,0,0));
+            earth.add(ring);
+
+            explosions.push({ sphere, ring, life: 1.0, scale: 1.0 });
+        }
+
+        function spawnInterceptor(targetLocalPos, targetMissile) {
+            playSound('intercept');
+            const group = new THREE.Group();
+            
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.25, 8), new THREE.MeshStandardMaterial({color: 0xffffff, roughness: 0.2}));
+            body.rotation.x = Math.PI / 2;
+            group.add(body);
+            
+            const nose = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.1, 8), new THREE.MeshStandardMaterial({color: 0xdd0000}));
+            nose.position.z = 0.175;
+            nose.rotation.x = Math.PI / 2;
+            group.add(nose);
+
+            const finGeo = new THREE.BoxGeometry(0.1, 0.01, 0.06);
+            const finMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            for(let i=0; i<4; i++) {
+                const fin = new THREE.Mesh(finGeo, finMat);
+                fin.rotation.z = (Math.PI / 2) * i;
+                fin.position.z = -0.08;
+                group.add(fin);
+            }
+            
+            const fire = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.2, 8), new THREE.MeshBasicMaterial({color: 0x0088ff, blending: THREE.AdditiveBlending}));
+            fire.position.z = -0.2;
+            fire.rotation.x = -Math.PI/2;
+            group.add(fire);
+
+            const glow = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 16), new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending}));
+            glow.position.z = -0.2;
+            group.add(glow);
+
+            const offset = new THREE.Vector3((Math.random()-0.5)*0.8, (Math.random()-0.5)*0.8, (Math.random()-0.5)*0.8);
+            const startPos = targetLocalPos.clone().add(offset).normalize().multiplyScalar(EARTH_RADIUS);
+            
+            group.position.copy(startPos);
+            
+            const upVector = startPos.clone().normalize();
+            group.lookAt(startPos.clone().add(upVector));
+
+            earth.add(group);
+
+            const trailGeo = new THREE.BufferGeometry();
+            trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(40 * 3), 3));
+            trailGeo.setDrawRange(0, 0);
+            const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8, linewidth: 2 }));
+            earth.add(trail);
+
+            const willHit = Math.random() > 0.35; 
+            const initialVelocity = upVector.multiplyScalar(0.05);
+
+            interceptors.push({ 
+                mesh: group, trail: trail, trailPts: [], target: targetMissile, 
+                pos: startPos.clone(), active: true, willHit: willHit,
+                velocity: initialVelocity
+            });
+        }
+
+        // שינוי הלוגיקה כדי לייצר כטב"ם או טיל לפי בחירה!
+        function createEntity(startVec, endVec, type, realDist, delayTime, targetName) {
+            const isUav = type === 'uav';
+            const distRatio = realDist / EARTH_RADIUS; 
+            
+            let speed = 2.5, arc = 0.08; 
+            if (type === 'icbm') { speed = 7.0; arc = 0.15; } 
+            else if (type === 'hypersonic') { speed = 4.0; arc = 0.02; }
+            else if (type === 'cruise') { speed = 0.3; arc = 0.005; }
+            else if (isUav) { speed = 0.08; arc = 0.001; } // כטב"ם - ממש איטי וטס נמוך מאוד
+            
+            const arcHeight = Math.max(distRatio * arc, (type === 'cruise' || isUav) ? 0.02 : 0.05);
+            const midPoint = startVec.clone().lerp(endVec, 0.5).normalize().multiplyScalar(EARTH_RADIUS + arcHeight);
+            const curve = new THREE.QuadraticBezierCurve3(startVec, midPoint, endVec);
+
+            const mGroup = new THREE.Group();
+            mGroup.visible = delayTime <= 0; 
+            const scale = isUav ? 0.35 : 0.4; 
+            
+            if (isUav) {
+                // בניית כטב"ם ריאליסטי
+                // גוף (אפור כהה)
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.03*scale, 0.03*scale, 0.6*scale, 16), new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 }));
+                body.rotation.x = Math.PI / 2; 
+                mGroup.add(body);
+                
+                // חרטום מעוגל
+                const nose = new THREE.Mesh(new THREE.SphereGeometry(0.03*scale, 16, 16), new THREE.MeshStandardMaterial({ color: 0x555555 }));
+                nose.position.z = 0.3*scale;
+                mGroup.add(nose);
+                
+                // כנפיים רחבות וישרות
+                const wing = new THREE.Mesh(new THREE.BoxGeometry(0.6*scale, 0.01*scale, 0.1*scale), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+                mGroup.add(wing);
+                
+                // זנב V
+                const tail1 = new THREE.Mesh(new THREE.BoxGeometry(0.15*scale, 0.01*scale, 0.05*scale), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+                tail1.position.set(0.06*scale, 0.04*scale, -0.28*scale);
+                tail1.rotation.z = Math.PI / 4;
+                mGroup.add(tail1);
+                
+                const tail2 = new THREE.Mesh(new THREE.BoxGeometry(0.15*scale, 0.01*scale, 0.05*scale), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+                tail2.position.set(-0.06*scale, 0.04*scale, -0.28*scale);
+                tail2.rotation.z = -Math.PI / 4;
+                mGroup.add(tail2);
+                
+                // מנוע כטב"ם - פליטה קטנה מאוד, בלי הילה
+                const engine = new THREE.Mesh(new THREE.ConeGeometry(0.02*scale, 0.1*scale, 8), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending }));
+                engine.position.z = -0.35*scale; engine.rotation.x = -Math.PI / 2;
+                mGroup.add(engine);
+            } else {
+                // בניית טיל רגיל (כמו שהיה)
+                const stg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04*scale, 0.04*scale, 0.4*scale, 16), new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.3 }));
+                stg1.rotation.x = Math.PI / 2; mGroup.add(stg1);
+                const stg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.035*scale, 0.04*scale, 0.2*scale, 16), new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 }));
+                stg2.rotation.x = Math.PI / 2; stg2.position.z = 0.3*scale; mGroup.add(stg2);
+                const nose = new THREE.Mesh(new THREE.ConeGeometry(0.035*scale, 0.12*scale, 16), new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 }));
+                nose.rotation.x = Math.PI / 2; nose.position.z = 0.46*scale; mGroup.add(nose);
+                const finGeo = new THREE.BoxGeometry(0.12*scale, 0.01*scale, 0.1*scale);
+                const finMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+                for(let i=0; i<4; i++) {
+                    const fin = new THREE.Mesh(finGeo, finMat);
+                    fin.rotation.z = (Math.PI / 2) * i; fin.position.z = -0.15*scale;
+                    mGroup.add(fin);
+                }
+                const fire = new THREE.Mesh(new THREE.ConeGeometry(0.05*scale, 0.25*scale, 8), new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }));
+                fire.position.z = -0.32*scale; fire.rotation.x = -Math.PI / 2; mGroup.add(fire);
+                const glow = new THREE.Mesh(new THREE.SphereGeometry(0.03*scale, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff3300, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending }));
+                glow.position.z = -0.3*scale; mGroup.add(glow);
+            }
+
+            mGroup.position.copy(startVec);
+            const localLook = startVec.clone().add(curve.getTangentAt(0));
+            mGroup.lookAt(localLook.applyMatrix4(earth.matrixWorld));
+
+            earth.add(mGroup);
+
+            const trailGeo = new THREE.BufferGeometry();
+            trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(60 * 3), 3));
+            trailGeo.setDrawRange(0, 0);
+            // שובל אפור ודק לכטב"ם, שובל כתום ובולט לטיל
+            const trailColor = isUav ? 0xaaaaaa : 0xff4400;
+            const trailOpacity = isUav ? 0.3 : 0.5;
+            const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: trailColor, transparent: true, opacity: trailOpacity }));
+            earth.add(trail);
+
+            missiles.push({
+                mesh: mGroup, trail, trailPts: [], curve, progress: 0, isUav: isUav,
+                flightTime: realDist / speed, targetName: targetName, 
+                delay: delayTime, active: delayTime <= 0, intercepted: false, targeted: false,
+                tgtVec: endVec, interceptAttempts: 0 
+            });
+        }
+
+        async function handleLaunch() {
+            let src = document.getElementById('sourceCity').value.trim();
+            let tgt = document.getElementById('targetCity').value.trim();
+            const type = document.getElementById('missileType').value;
+            let count = parseInt(document.getElementById('missileCount').value) || 1;
+            if (count > 300) count = 300; 
+            
+            const btn = document.getElementById('launchBtn');
+
+            if(!src || !tgt) {
+                addLog('Error: Please specify origin and target.', 'danger');
+                return;
+            }
+
+            btn.disabled = true; btn.innerText = "Targeting..."; btn.classList.replace('bg-red-600', 'bg-slate-600');
+            
+            const srcCoord = await getCoords(src);
+            const tgtCoord = await getCoords(tgt);
+            
+            if (!srcCoord || !tgtCoord) {
+                addLog(`Targeting Error: Unable to locate specified cities.`, 'danger');
+                btn.disabled = false; btn.innerText = "Initiate Strike"; btn.classList.replace('bg-slate-600', 'bg-red-600');
+                return;
+            }
+
+            btn.disabled = false; btn.innerText = "Initiate Strike"; btn.classList.replace('bg-slate-600', 'bg-red-600');
+            
+            // הפעלת סאונד שיגור!
+            playSound('launch');
+
+            document.getElementById('sourceCity').value = srcCoord.name;
+            document.getElementById('targetCity').value = tgtCoord.name;
+            
+            spawnCityBlocks(tgtCoord.lat, tgtCoord.lon, tgtCoord.name);
+            
+            const realDist = getDistanceKm(srcCoord.lat, srcCoord.lon, tgtCoord.lat, tgtCoord.lon);
+            
+            let speedKmS = 2.5;
+            if (type === 'icbm') speedKmS = 7.0;
+            else if (type === 'hypersonic') speedKmS = 4.0;
+            else if (type === 'cruise') speedKmS = 0.3;
+            else if (type === 'uav') speedKmS = 0.08;
+            
+            const flightTimeSecs = Math.round(realDist / speedKmS);
+            const flightMins = Math.floor(flightTimeSecs / 60);
+            const flightSecs = flightTimeSecs % 60;
+            const timeStr = flightMins > 0 ? `${flightMins}m ${flightSecs}s` : `${flightSecs}s`;
+            
+            const typeName = type === 'uav' ? 'UAV(s)' : 'missile(s)';
+            addLog(`WARNING: Launching volley of ${count} ${typeName} from ${srcCoord.name} to ${tgtCoord.name}`, 'warning');
+            addLog(`Est. Real-World Flight Time: ${timeStr} (${Math.round(realDist)}km)`, 'info');
+            
+            gameStats.launched += count;
+            updateStatsUI();
+
+            for(let i=0; i<count; i++) {
+                const jLatS = srcCoord.lat + (Math.random()-0.5)*0.8;
+                const jLonS = srcCoord.lon + (Math.random()-0.5)*0.8;
+                const jLatT = tgtCoord.lat + (Math.random()-0.5)*0.8;
+                const jLonT = tgtCoord.lon + (Math.random()-0.5)*0.8;
+                
+                const sVec = latLongToVector3(jLatS, jLonS, EARTH_RADIUS);
+                const tVec = latLongToVector3(jLatT, jLonT, EARTH_RADIUS);
+                
+                createEntity(sVec, tVec, type, realDist, i * 0.4, tgtCoord.name);
+            }
+
+            // עדכון המעקב רק אם אין משהו שעוקבים אחריו עכשיו
+            if (!trackedMissile || trackedMissile.progress >= 1.0 || trackedMissile.intercepted) {
+                trackedMissile = missiles[missiles.length - count]; 
+            }
+            
+            if (currentCameraMode === 'free') {
+                const startPosLocal = latLongToVector3(srcCoord.lat, srcCoord.lon, EARTH_RADIUS);
+                const worldStart = startPosLocal.clone().applyMatrix4(earth.matrixWorld);
+                const lookPos = worldStart.clone().normalize().multiplyScalar(EARTH_RADIUS + 15);
+                camera.position.copy(lookPos);
+                controls.target.set(0,0,0); // איפוס מטרה כדי לא לשבור את הזום והסיבוב
+            }
+
+            if(window.innerWidth < 1024) panel.classList.add('collapsed');
+        }
+
+        document.getElementById('launchBtn').addEventListener('click', handleLaunch);
+
+        // --- Animation Loop ---
+        function animate(time) {
+            requestAnimationFrame(animate);
+            time *= 0.001; const dt = time - lastTime; lastTime = time;
+            
+            const speedMult = parseFloat(document.getElementById('simSpeed').value);
+            const airDefOn = document.getElementById('airDefense').checked;
+
+            controls.update();
+            if(earth) {
+                earth.rotation.y += 0.01 * dt * (speedMult > 10 ? 1 : 0.5);
+                if(earth.userData.clouds) earth.userData.clouds.rotation.y += 0.003 * dt; 
+            }
+
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                const m = missiles[i];
+                
+                if (m.delay > 0) {
+                    m.delay -= dt * speedMult;
+                    if (m.delay <= 0) { m.active = true; m.mesh.visible = true; }
+                    continue;
+                }
+                if (!m.active) continue;
+
+                if (currentCameraMode === 'pov') {
+                    m.mesh.visible = (m === trackedMissile);
+                    m.trail.visible = (m === trackedMissile); 
+                } else {
+                    m.mesh.visible = true;
+                    m.trail.visible = true;
+                }
+
+                m.progress += (dt * speedMult) / m.flightTime;
+
+                if (airDefOn && !m.intercepted && m.progress > 0.40 && m.progress < 0.95 && m.interceptAttempts < 2) {
+                    if (!m.lastInterceptProgress || (m.progress - m.lastInterceptProgress) > 0.25) {
+                        m.lastInterceptProgress = m.progress;
+                        m.interceptAttempts++;
+                        spawnInterceptor(m.tgtVec, m); 
+                    }
+                }
+
+                if (m.progress >= 0.99) {
+                    m.progress = 0.99;
+                    
+                    if (m === trackedMissile && currentCameraMode === 'pov') {
+                        povExplosion.active = true;
+                        const upVec = m.curve.getPointAt(0.99).normalize();
+                        povExplosion.pos = m.curve.getPointAt(0.99).add(upVec.multiplyScalar(0.05)).applyMatrix4(earth.matrixWorld); 
+                        povExplosion.timer = 2.0; 
+                    }
+                    
+                    createExplosion(m.curve.getPointAt(0.99), 0xff2200, 2.5); 
+                    gameStats.hits++; updateStatsUI();
+                    addLog(`IMPACT CONFIRMED: ${m.targetName}`, 'danger');
+
+                    earth.remove(m.mesh); earth.remove(m.trail);
+                    missiles.splice(i, 1);
+                } else {
+                    const pos = m.curve.getPointAt(m.progress);
+                    m.mesh.position.copy(pos);
+                    
+                    const tangent = m.curve.getTangentAt(m.progress).normalize();
+                    const lookTargetLocal = pos.clone().add(tangent);
+                    m.mesh.lookAt(earth.localToWorld(lookTargetLocal));
+
+                    m.trailPts.push(pos.clone());
+                    if (m.trailPts.length > 50) m.trailPts.shift();
+                    const arr = m.trail.geometry.attributes.position.array;
+                    for (let j = 0; j < m.trailPts.length; j++) {
+                        arr[j*3] = m.trailPts[j].x; arr[j*3+1] = m.trailPts[j].y; arr[j*3+2] = m.trailPts[j].z;
+                    }
+                    m.trail.geometry.setDrawRange(0, m.trailPts.length);
+                    m.trail.geometry.attributes.position.needsUpdate = true;
+                }
+            }
+
+            for (let i = interceptors.length - 1; i >= 0; i--) {
+                const int = interceptors[i];
+                
+                if (int.target.intercepted || int.target.progress >= 1.0) {
+                    createExplosion(int.pos, 0xaaaaaa, 0.5); 
+                    earth.remove(int.mesh); earth.remove(int.trail);
+                    interceptors.splice(i, 1);
+                    continue;
+                }
+
+                const targetPos = int.target.mesh.position;
+                const dir = targetPos.clone().sub(int.pos);
+                const dist = dir.length();
+                const intSpeed = 0.8 * speedMult * dt; 
+
+                if (dist < 0.25 || intSpeed >= dist) {
+                    if (int.willHit) {
+                        int.target.intercepted = true;
+                        if (int.target === trackedMissile && currentCameraMode === 'pov') {
+                            povExplosion.active = true;
+                            povExplosion.pos = int.pos.clone().applyMatrix4(earth.matrixWorld); 
+                            povExplosion.timer = 2.0; 
+                        }
+                        createExplosion(int.pos, 0x00aaff, 2.0); 
+                        gameStats.intercepted++; updateStatsUI();
+                        addLog(`Successful intercept over ${int.target.targetName}!`, 'success');
+                    } else {
+                        createExplosion(int.pos, 0x888888, 1.2); 
+                        addLog(`Interceptor missed its target!`, 'warning');
+                    }
+                    
+                    earth.remove(int.mesh); earth.remove(int.trail);
+                    interceptors.splice(i, 1);
+                    continue;
+                }
+
+                const desiredVelocity = dir.normalize().multiplyScalar(intSpeed);
+                const turnRate = Math.min(1.0, 0.15 * Math.max(1, speedMult / 10));
+                
+                int.velocity.lerp(desiredVelocity, turnRate);
+                int.velocity.normalize().multiplyScalar(intSpeed);
+                
+                int.pos.add(int.velocity);
+                int.mesh.position.copy(int.pos);
+                int.mesh.lookAt(earth.localToWorld(int.pos.clone().add(int.velocity)));
+
+                int.trailPts.push(int.pos.clone());
+                if (int.trailPts.length > 20) int.trailPts.shift();
+                const arr = int.trail.geometry.attributes.position.array;
+                for (let j = 0; j < int.trailPts.length; j++) {
+                    arr[j*3] = int.trailPts[j].x; arr[j*3+1] = int.trailPts[j].y; arr[j*3+2] = int.trailPts[j].z;
+                }
+                int.trail.geometry.setDrawRange(0, int.trailPts.length);
+                int.trail.geometry.attributes.position.needsUpdate = true;
+            }
+
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const exp = explosions[i];
+                exp.life -= dt * (speedMult * 0.3 + 0.5); 
+                if (exp.life <= 0) {
+                    earth.remove(exp.sphere); earth.remove(exp.ring);
+                    exp.sphere.geometry.dispose(); exp.sphere.material.dispose();
+                    exp.ring.geometry.dispose(); exp.ring.material.dispose();
+                    explosions.splice(i, 1);
+                } else {
+                    exp.scale += dt * 5;
+                    exp.sphere.scale.set(exp.scale, exp.scale, exp.scale);
+                    exp.ring.scale.set(exp.scale * 1.5, exp.scale * 1.5, exp.scale * 1.5);
+                    exp.sphere.material.opacity = exp.life; 
+                    exp.ring.material.opacity = exp.life * 0.8; 
+                } 
+            } 
+
+            if (currentCameraMode === 'pov') {
+                povHud.classList.add('active');
+                
+                const activeCount = missiles.filter(m => m.active && !m.intercepted && m.progress < 1.0).length;
+                document.getElementById('hud-active').innerText = activeCount;
+
+                if (povExplosion.active) {
+                    povExplosion.timer -= dt;
+                    document.getElementById('hud-status').innerText = "IMPACT DETECTED - ANALYZING...";
+                    document.getElementById('hud-status').className = "text-red-500 font-bold";
+                    
+                    if (povExplosion.timer <= 0) {
+                        povExplosion.active = false;
+                        trackedMissile = null; 
+                        
+                        currentCameraMode = 'free';
+                        cameraModeSelect.value = 'free';
+                        controls.enabled = true;
+                        controls.target.set(0, 0, 0); // מבטיח שאפשר לעשות זום תקין!
+                        addLog('Satellite link returned to free orbit mode.', 'info');
+                    } else {
+                        controls.enabled = false;
+                        const shakeX = (Math.random() - 0.5) * 0.4;
+                        const shakeY = (Math.random() - 0.5) * 0.4;
+                        
+                        const upVec = povExplosion.pos.clone().normalize();
+                        const camPos = povExplosion.pos.clone()
+                            .add(upVec.multiplyScalar(1.5)) 
+                            .add(new THREE.Vector3(shakeX, shakeY, shakeX));
+                            
+                        camera.position.lerp(camPos, 0.2); 
+                        camera.lookAt(povExplosion.pos); 
+                    }
+                } 
+                else {
+                    if (!trackedMissile || trackedMissile.intercepted || trackedMissile.progress >= 1.0) {
+                        trackedMissile = missiles.find(m => m.active && !m.intercepted && m.progress < 1.0) || 
+                                         missiles.find(m => !m.intercepted && m.progress < 1.0) || null;
+                    }
+
+                    if (trackedMissile) {
+                        controls.enabled = false;
+                        const nameDisplay = trackedMissile.isUav ? "UAV DRONE" : "MISSILE";
+                        document.getElementById('hud-target').innerText = `${trackedMissile.targetName.toUpperCase()} (${nameDisplay})`;
+                        document.getElementById('hud-status').innerText = "TRACKING ACTIVE";
+                        document.getElementById('hud-status').className = "text-emerald-400 font-bold";
+                        
+                        const mWorldPos = new THREE.Vector3();
+                        trackedMissile.mesh.getWorldPosition(mWorldPos);
+                        
+                        const mDir = trackedMissile.curve.getTangentAt(Math.max(0, trackedMissile.progress)).normalize();
+                        mDir.applyQuaternion(earth.quaternion); 
+                        const mUp = mWorldPos.clone().normalize(); 
+                        
+                        let shakeX = 0, shakeY = 0;
+                        if (trackedMissile.active) {
+                            shakeX = (Math.random() - 0.5) * 0.002; 
+                            shakeY = (Math.random() - 0.5) * 0.002;
+                        }
+                        
+                        // זוויות שונות לכטב"ם (רואים יפה את הכנפיים) או טיל
+                        const pullBack = trackedMissile.isUav ? 0.3 : 0.2;
+                        const pullUp = trackedMissile.isUav ? 0.2 : 0.15;
+
+                        const camPos = mWorldPos.clone()
+                            .sub(mDir.clone().multiplyScalar(pullBack)) 
+                            .add(mUp.clone().multiplyScalar(pullUp)) 
+                            .add(mDir.clone().cross(mUp).multiplyScalar(shakeX))
+                            .add(mUp.clone().multiplyScalar(shakeY));
+                            
+                        camera.position.copy(camPos); 
+                        
+                        const lookTarget = mWorldPos.clone()
+                            .add(mDir.clone().multiplyScalar(1.5)) 
+                            .sub(mUp.clone().multiplyScalar(0.2)); 
+
+                        camera.lookAt(lookTarget);
+                    } else if (missiles.length === 0) {
+                        controls.enabled = true;
+                        document.getElementById('hud-target').innerText = "AWAITING COMMAND";
+                        document.getElementById('hud-status').innerText = "STANDBY";
+                        document.getElementById('hud-status').className = "text-yellow-400 font-bold";
+                    }
+                }
+            } else {
+                povHud.classList.remove('active');
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init3D;
+    </script>
+</body>
+</html>
