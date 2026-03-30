@@ -232,7 +232,18 @@
             <h3 class="text-[0.65rem] font-bold text-slate-400 uppercase mb-1 border-b border-slate-700 pb-1">System Logs</h3>
             <div id="log-container" class="flex-1 overflow-y-auto pr-1 flex flex-col justify-start">
                 <div class="log-entry log-info">System Ready. Awaiting orders.</div>
-            </div>
+          <div id="mission-panel" class="mt-4 p-3 bg-black/60 border border-cyan-500/50 rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.2)]">
+    <div class="flex justify-between items-center mb-2">
+        <h3 class="text-cyan-400 text-[10px] font-bold uppercase tracking-widest italic">Active Mission</h3>
+        <span id="mission-id" class="bg-cyan-900 text-cyan-300 px-1.5 py-0.5 rounded text-[9px] font-mono">01</span>
+    </div>
+    <div id="mission-title" class="text-white text-sm font-bold leading-tight uppercase">First Strike</div>
+    <div id="mission-desc" class="text-gray-400 text-[10px] mt-1 italic leading-relaxed border-b border-white/5 pb-2">Launch 1 missile to test global reach.</div>
+    
+    <div class="w-full bg-gray-800 h-1 mt-3 rounded-full overflow-hidden border border-gray-700">
+        <div id="mission-progress" class="bg-gradient-to-r from-cyan-600 to-blue-400 h-full transition-all duration-700" style="width: 0%"></div>
+    </div>
+</div>  </div>
         </div>
     </div>
 
@@ -623,7 +634,12 @@
                 {x: 0, y: 0, r: 0.02, h: 1.0}, 
                 {x: 0.015, y: 0.015, r: 0.015, h: 0.5}, 
                 {x: -0.015, y: -0.015, r: 0.02, h: 0.4} 
-            ];
+            ];// עדכון התקדמות המשימה
+if (typeof checkMissionProgress === 'function') {
+    const amountInput = document.getElementById('missile-amount');
+    const amount = amountInput ? parseInt(amountInput.value) || 1 : 1;
+    checkMissionProgress('launch', amount);
+}
             
             for(let i=0; i<numBuildings; i++) {
                 const dist = districts[Math.floor(Math.random() * districts.length)];
@@ -825,7 +841,7 @@
             const localLook = startVec.clone().add(curve.getTangentAt(0));
             mGroup.lookAt(localLook.applyMatrix4(earth.matrixWorld));
 
-            earth.add(mGroup);
+            earth.add(mGroup);checkMissionProgress('intercept');
 
             const trailGeo = new THREE.BufferGeometry();
             trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(60 * 3), 3));
@@ -1170,7 +1186,52 @@
             renderer.render(scene, camera);
         }
 
-        window.onload = init3D;
+        window.onload = init3D;// --- Mission System Logic ---
+let gameState = {
+    currentMission: 1,
+    interceptedCount: 0
+};
+
+const missions = {
+    1: { title: "First Strike", desc: "Launch 1 missile to test global reach.", goal: 1 },
+    2: { title: "Massive Barrage", desc: "Launch 300 missiles at once.", goal: 300 },
+    3: { title: "Iron Dome Defense", desc: "Intercept 5 incoming enemy missiles.", goal: 5 }
+};
+
+function updateMissionUI() {
+    const mission = missions[gameState.currentMission];
+    if (!mission) {
+        document.getElementById('mission-title').innerText = "ALL MISSIONS CLEAR";
+        document.getElementById('mission-desc').innerText = "You have secured the globe.";
+        return;
+    }
+    document.getElementById('mission-id').innerText = "0" + gameState.currentMission;
+    document.getElementById('mission-title').innerText = mission.title;
+    document.getElementById('mission-desc').innerText = mission.desc;
+    document.getElementById('mission-progress').style.width = "0%";
+}
+
+function checkMissionProgress(type, count = 1) {
+    if (gameState.currentMission === 1 && type === 'launch') {
+        completeMission();
+    } else if (gameState.currentMission === 2 && type === 'launch' && count >= 300) {
+        completeMission();
+    } else if (gameState.currentMission === 3 && type === 'intercept') {
+        gameState.interceptedCount++;
+        let progress = (gameState.interceptedCount / missions[3].goal) * 100;
+        document.getElementById('mission-progress').style.width = progress + "%";
+        if (gameState.interceptedCount >= missions[3].goal) completeMission();
+    }
+}
+
+function completeMission() {
+    document.getElementById('mission-progress').style.width = "100%";
+    setTimeout(() => {
+        alert("COMPLETED: " + missions[gameState.currentMission].title);
+        gameState.currentMission++;
+        updateMissionUI();
+    }, 600);
+}
     </script>
 </body>
 </html>
