@@ -1172,9 +1172,7 @@ if (typeof checkMissionProgress === 'function') {
                         
                         const lookTarget = mWorldPos.clone()
                             .add(mDir.clone().multiplyScalar(1.5)) 
-                            .sub(mUp.clone().multiplyScalar(0.2)); 
-
-                        camera.lookAt(lookTarget);
+            camera.lookAt(lookTarget);
                     } else if (missiles.length === 0) {
                         controls.enabled = true;
                         document.getElementById('hud-target').innerText = "AWAITING COMMAND";
@@ -1182,14 +1180,22 @@ if (typeof checkMissionProgress === 'function') {
                         document.getElementById('hud-status').className = "text-yellow-400 font-bold";
                     }
                 }
-            window.onload = () => {
+            } else {
+                const povHud = document.getElementById('pov-hud');
+                if (povHud) povHud.classList.remove('active');
+            }
+
+            renderer.render(scene, camera);
+        } // סגירה של animate
+
+        // --- הפעלה וניהול משימות ---
+        window.onload = () => {
             init3D();
             if (typeof updateMissionUI === 'function') {
                 updateMissionUI();
             }
         };
 
-        // --- Mission System Logic ---
         let gameState = {
             currentMission: 1,
             interceptedCount: 0
@@ -1203,15 +1209,19 @@ if (typeof checkMissionProgress === 'function') {
 
         function updateMissionUI() {
             const mission = missions[gameState.currentMission];
+            const titleEl = document.getElementById('mission-title');
+            const descEl = document.getElementById('mission-desc');
+            const idEl = document.getElementById('mission-id');
+
             if (!mission) {
-                document.getElementById('mission-title').innerText = "ALL MISSIONS CLEAR";
-                document.getElementById('mission-desc').innerText = "You have secured the globe.";
-                document.getElementById('mission-id').innerText = "DONE";
+                if (titleEl) titleEl.innerText = "ALL MISSIONS CLEAR";
+                if (descEl) descEl.innerText = "You have secured the globe.";
+                if (idEl) idEl.innerText = "DONE";
                 return;
             }
-            document.getElementById('mission-id').innerText = "0" + gameState.currentMission;
-            document.getElementById('mission-title').innerText = mission.title;
-            document.getElementById('mission-desc').innerText = mission.desc;
+            if (idEl) idEl.innerText = "0" + gameState.currentMission;
+            if (titleEl) titleEl.innerText = mission.title;
+            if (descEl) descEl.innerText = mission.desc;
         }
 
         function checkMissionProgress(type, count = 1) {
@@ -1222,7 +1232,8 @@ if (typeof checkMissionProgress === 'function') {
             } else if (gameState.currentMission === 3 && type === 'intercept') {
                 gameState.interceptedCount++;
                 let progress = (gameState.interceptedCount / missions[3].goal) * 100;
-                document.getElementById('mission-progress').style.width = progress + "%";
+                const progBar = document.getElementById('mission-progress');
+                if (progBar) progBar.style.width = progress + "%";
                 if (gameState.interceptedCount >= missions[3].goal) completeMission();
             }
         }
@@ -1236,28 +1247,21 @@ if (typeof checkMissionProgress === 'function') {
                 if (currentMissionData) {
                     alert("MISSION ACCOMPLISHED: " + currentMissionData.title);
                 }
-
                 gameState.currentMission++;
                 updateMissionUI();
-                
-                if (gameState.currentMission === 3) {
-                    startEnemyAttack();
-                }
+                if (gameState.currentMission === 3) startEnemyAttack();
             }, 600);
         }
 
         function startEnemyAttack() {
-            addLog("RED ALERT: INCOMING MISSILES FROM TEHRAN", "danger");
-            
+            if (typeof addLog === 'function') addLog("RED ALERT: INCOMING MISSILES FROM TEHRAN", "danger");
             const attackInterval = setInterval(() => {
                 if (gameState.currentMission !== 3) {
                     clearInterval(attackInterval);
                     return;
                 }
-                
-                const origin = { lat: 35.6892, lon: 51.3890 }; // טהרן
-                const target = { lat: 31.0461, lon: 34.8516 }; // ישראל
-                
+                const origin = { lat: 35.6892, lon: 51.3890 }; 
+                const target = { lat: 31.0461, lon: 34.8516 };
                 if (typeof createMissile === 'function') {
                     createMissile(origin, target, 'ballistic');
                 }
